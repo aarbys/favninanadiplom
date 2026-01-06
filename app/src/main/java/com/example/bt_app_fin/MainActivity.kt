@@ -42,65 +42,40 @@ class MainActivity : ComponentActivity() {
     // Хуйня для подключения нужная
     private val gattCallback = object : BluetoothGattCallback() {
 
-        override fun onConnectionStateChange(
-            gatt: BluetoothGatt,
-            status: Int,
-            newState: Int
-        ) {
-            Log.e("BLE", "onConnectionStateChange CALLED")
-            Log.e("BLE", "status=$status newState=$newState")
-
+        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                Log.e("BLE", "CONNECTED")
-                bluetoothGatt = gatt
                 gatt.discoverServices()
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                Log.e("BLE", "DISCONNECTED")
             }
         }
 
-
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            gatt.setCharacteristicNotification(uartChar, true)
-
-            val service = gatt.getService(SERVICE_UUID)
-            val uartChar = service?.getCharacteristic(CHAR_UUID)
-            Log.e("BLE", "Characteristic found? ${uartChar != null}")
-
-
-            gatt.setCharacteristicNotification(uartChar, true)
-
-            val cccd = uartChar!!.getDescriptor(
-                CCCD_UUID
-            )
-
-            cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-            gatt.writeDescriptor(cccd)
-
-            Log.e("BLE", "UART READY")
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                val service = gatt.getService(SERVICE_UUID)
+                if (service != null) {
+                    uartChar = service.getCharacteristic(CHAR_UUID)
+                    Log.d("BLE", "UART characteristic found: ${uartChar?.uuid}")
+                } else {
+                    Log.e("BLE", "SERVICE NOT FOUND!")
+                }
+            }
         }
 
-
-
-
-        override fun onCharacteristicChanged(
+        override fun onCharacteristicRead(
             gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic
-        ) {
-            val data = characteristic.value.toString(Charsets.UTF_8)
-            Log.e("BLE", "RX=$data")
-        }
-
-
-        override fun onDescriptorWrite(
-            gatt: BluetoothGatt,
-            descriptor: BluetoothGattDescriptor,
+            characteristic: BluetoothGattCharacteristic,
             status: Int
         ) {
-            Log.e("BLE", "CCCD write status=$status")
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                // Тут ты получаешь ответ от МК
+                val response = characteristic.value
+                val text = response.toString(Charsets.UTF_8)
+                Log.d("BLE", "MK response: $text")
+            } else {
+                Log.e("BLE", "Characteristic read failed, status=$status")
+            }
         }
-
     }
+
 
 
 
@@ -109,14 +84,22 @@ class MainActivity : ComponentActivity() {
 
     // Функция отправки команд
     private fun sendCommand(cmd: String) {
-        if (uartChar == null || bluetoothGatt == null) {
+        val gatt = bluetoothGatt
+        val char = uartChar
+
+        if (gatt == null || char == null) {
             Log.e("BLE", "UART not ready yet")
             return
         }
 
-        uartChar!!.value = cmd.toByteArray(Charsets.UTF_8)
-        bluetoothGatt!!.writeCharacteristic(uartChar!!)
+        char.setValue(cmd.toByteArray())
+        val writeResult = gatt.writeCharacteristic(char)
+        Log.d("BLE", "writeCharacteristic result=$writeResult")
+
+        // Сразу читаем, чтобы получить ответ
+        gatt.readCharacteristic(char)
     }
+
 
 
 
@@ -176,7 +159,7 @@ class MainActivity : ComponentActivity() {
 
 
         redBtn.setOnClickListener {
-            sendCommand("red\n")
+            sendCommand("Pass123!\n")
         }
         greenBtn.setOnClickListener {
             sendCommand("green\n")
