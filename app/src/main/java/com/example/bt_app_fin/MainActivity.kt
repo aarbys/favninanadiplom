@@ -13,9 +13,10 @@ import androidx.core.app.ActivityCompat
 import java.util.*
 import android.os.Handler
 import android.os.Looper
+import kotlin.math.log
 
 class MainActivity : ComponentActivity() {
-
+    private var notificationsEnabled = false
     private val TAG = "BT"
 
     // Тут бля куча переменных, все их заполняем.  И кнопочки инициализируем
@@ -127,10 +128,10 @@ class MainActivity : ComponentActivity() {
                     Log.d(TAG, "UART characteristic found, +$func_name")
 
                     // включаем уведомления
-                    gatt.setCharacteristicNotification(uartChar, true)
-                    val desc = uartChar!!.getDescriptor(CCCD_UUID)
-                    desc?.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                    desc?.let { gatt.writeDescriptor(it) }
+
+
+
+                    //Log.e(TAG, "$desc, +$func_name")
 
                 } else {
                     Log.e(TAG, "Service $SERVICE_UUID not found, retrying discovery...+, +$func_name")
@@ -145,33 +146,6 @@ class MainActivity : ComponentActivity() {
         }
 
 
-        override fun onDescriptorWrite(
-            gatt: BluetoothGatt?,
-            descriptor: BluetoothGattDescriptor?,
-            status: Int
-        ) {
-            var func_name = "onDescriptorWrite"
-            super.onDescriptorWrite(gatt, descriptor, status)
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                Log.d(TAG, "Notifications enabled for UART characteristic, +$func_name")
-            } else {
-                Log.e(TAG, "Failed to enable notifications, status=$status, +$func_name")
-            }
-        }
-
-        override fun onCharacteristicChanged(
-            gatt: BluetoothGatt?,
-            characteristic: BluetoothGattCharacteristic?
-        ) {
-            var func_name = "onCharacteristicChanged"
-            super.onCharacteristicChanged(gatt, characteristic)
-            val raw = characteristic?.value
-            if (raw != null) {
-                val value = String(raw, Charsets.UTF_8)
-                Log.d(TAG, "Received from MCU: $value, +$func_name")
-            }
-        }
-
         override fun onCharacteristicWrite(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
@@ -185,19 +159,43 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            var func_name = "onCharacteristicWrite"
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                val value = String(characteristic.value, Charsets.UTF_8)
+                val data = characteristic.value ?: return
+                val hex = data.joinToString(" ") { String.format("%02X", it) }
+                Log.d(TAG, "Echo from MCU (hex): $hex, func=$func_name")
+                Log.d(TAG, "Echo from MCU: $value, func=$func_name")
+            } else {
+                Log.e(TAG, "Read failed, status=$status, func=$func_name")
+            }
+        }
+
+
+
     }
 
 
     // Отправка команд на МК
-    private fun sndCmd(command: String) {
-        var func_name = "sndCmd"
+    fun sndCmd(cmd: String) {
         uartChar?.let { char ->
             char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-            char.value = (command + "!").toByteArray(Charsets.UTF_8) // ! как конец команды
-            val result = bluetoothGatt?.writeCharacteristic(char) ?: false
-            Log.d(TAG, "Sent: $command!, writeCharacteristic result=$result, +$func_name")
-        } ?: Log.e(TAG, "UART characteristic not ready, +$func_name")
-    }
+            char.value = cmd.toByteArray(Charsets.UTF_8)
+            val hex = char.value.joinToString(" ") { String.format("%02X", it) }
+            Log.d(TAG, "Sending command (hex): $hex")
 
+            val result = bluetoothGatt?.writeCharacteristic(char)
+            Log.d(TAG, "Sent: $cmd, writeCharacteristic result=$result")
+
+            Handler(Looper.getMainLooper()).postDelayed({
+                bluetoothGatt?.readCharacteristic(char)
+            }, 150)
+        }
+    }
 
 }
