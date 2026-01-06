@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
 
 
 
+
     // Функция отправки команд
     private fun sendCommand(cmd: String) {
         val gatt = bluetoothGatt
@@ -89,6 +90,7 @@ class MainActivity : ComponentActivity() {
 
         if (gatt == null || char == null) {
             Log.e("BLE", "UART not ready yet")
+            Log.e("BLE", "$gatt || $char")
             return
         }
 
