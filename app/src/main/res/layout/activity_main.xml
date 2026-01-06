@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <EditText
+        android:id="@+id/PW_FIELD"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Пароль"
+        android:padding="12dp" />
+
+    <Button
+        android:id="@+id/SEND_BTN"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Отправить"
+        android:textColor="#000000" />
+
+    <TextView
+        android:id="@+id/MAC_ADRESS"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="mac-adress:"
+        android:textColor="#000000" />
+
+    <TextView
+        android:id="@+id/CONNECTION"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="status:"
+        android:textColor="#000000" />
+
+
+    <GridLayout
+        android:layout_width="match_parent"
+        android:layout_height="592dp"
+        android:layout_marginTop="32dp"
+        android:columnCount="2">
+
+        <Button
+            android:id="@+id/redBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:backgroundTint='#ff0000'
+            android:text="Красный"
+            android:textColor="#ffffff" />
+
+        <Button
+            android:id="@+id/yellowBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:backgroundTint='#b5b50e'
+            android:text="желтый"
+            android:textColor="#ffffff" />
+
+        <Button
+            android:id="@+id/greenBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:backgroundTint='#00ff00'
+            android:text="зелёный"
+            android:textColor="#ffffff" />
+
+        <Button
+            android:id="@+id/blueBtn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:backgroundTint='#0000ff'
+            android:text="синий"
+            android:textColor="#ffffff" />
+
+        <Button
+            android:id="@+id/turnOnAll"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:text="Включить все" />
+
+        <Button
+            android:id="@+id/turnOffAll"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:text="Выключить все" />
+
+    </GridLayout>
+
+</LinearLayout>
