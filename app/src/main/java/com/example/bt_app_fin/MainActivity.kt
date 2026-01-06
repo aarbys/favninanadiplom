@@ -86,12 +86,12 @@ class MainActivity : ComponentActivity() {
             if (text.isNotEmpty()) sndCmd(text)
         }
 
-        redBtn.setOnClickListener { sndCmd("Red") }
-        greenBtn.setOnClickListener { sndCmd("GREEN") }
-        blueBtn.setOnClickListener { sndCmd("BLUE") }
-        yellowBtn.setOnClickListener { sndCmd("YELLOW") }
-        turnOffAll.setOnClickListener { sndCmd("OFF_ALL") }
-        turnOnAll.setOnClickListener { sndCmd("ON_ALL") }
+        redBtn.setOnClickListener { sndCmd("Red\n") }
+        greenBtn.setOnClickListener { sndCmd("GREEN\n") }
+        blueBtn.setOnClickListener { sndCmd("BLUE\n") }
+        yellowBtn.setOnClickListener { sndCmd("YEL\n") }
+        turnOffAll.setOnClickListener { sndCmd("OFF_ALL\n") }
+        turnOnAll.setOnClickListener { sndCmd("ON_ALL\n") }
     }
 
     private fun startBleConnection() {
@@ -126,12 +126,6 @@ class MainActivity : ComponentActivity() {
                 if (service != null) {
                     uartChar = service.getCharacteristic(CHAR_UUID)
                     Log.d(TAG, "UART characteristic found, +$func_name")
-
-                    // включаем уведомления
-
-
-
-                    //Log.e(TAG, "$desc, +$func_name")
 
                 } else {
                     Log.e(TAG, "Service $SERVICE_UUID not found, retrying discovery...+, +$func_name")
@@ -182,20 +176,17 @@ class MainActivity : ComponentActivity() {
 
 
     // Отправка команд на МК
-    fun sndCmd(cmd: String) {
-        uartChar?.let { char ->
-            char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-            char.value = cmd.toByteArray(Charsets.UTF_8)
-            val hex = char.value.joinToString(" ") { String.format("%02X", it) }
-            Log.d(TAG, "Sending command (hex): $hex")
+    fun sndCmd(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, cmd: String) {
 
-            val result = bluetoothGatt?.writeCharacteristic(char)
-            Log.d(TAG, "Sent: $cmd, writeCharacteristic result=$result")
+        val command = if (cmd.endsWith("!") || cmd.endsWith("\n")) cmd else cmd + "\n"
 
-            Handler(Looper.getMainLooper()).postDelayed({
-                bluetoothGatt?.readCharacteristic(char)
-            }, 150)
-        }
+        val bytes = command.toByteArray(Charsets.US_ASCII)
+
+        characteristic.value = bytes
+        characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT // write-with-response
+        val result = gatt.writeCharacteristic(characteristic)
+
+        Log.d(TAG, "Sent command: $command, result=$result")
     }
 
 }
