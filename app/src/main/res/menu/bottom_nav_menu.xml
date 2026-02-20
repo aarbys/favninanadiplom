@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/nav_login"
+        android:icon="@drawable/ic_auth"
+        android:title="Вход" />
+
+    <item
+        android:id="@+id/nav_server"
+        android:icon="@drawable/ic_database"
+        android:title="Данные БД" />
+
+    <item
+        android:id="@+id/nav_mk"
+        android:icon="@drawable/ic_bluetooth"
+        android:title="Управление МК" />
+
+</menu>

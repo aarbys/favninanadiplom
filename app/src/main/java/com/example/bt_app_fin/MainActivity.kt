@@ -1,192 +1,188 @@
+
 package com.example.bt_app_fin
 
-import android.Manifest
-import android.bluetooth.*
-import android.os.Build
-import android.os.Bundle
 import android.util.Log
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
-import androidx.activity.ComponentActivity
-import androidx.core.app.ActivityCompat
-import java.util.*
-import android.os.Handler
-import android.os.Looper
-import kotlin.math.log
+import android.util.Log.VERBOSE
+import android.util.Log.DEBUG
+import android.util.Log.INFO
+import android.util.Log.WARN
+import android.util.Log.ERROR
+import android.os.Bundle
+import androidx.appcompat.app.AppCompatActivity
+import androidx.fragment.app.Fragment
+import com.google.android.material.bottomnavigation.BottomNavigationView
 
-class MainActivity : ComponentActivity() {
-    private var notificationsEnabled = false
-    private val TAG = "BT"
+import android.content.pm.PackageManager
 
-    // Тут бля куча переменных, все их заполняем.  И кнопочки инициализируем
-    private val SERVICE_UUID = UUID.fromString("0000fff0-0000-1000-8000-00805f9b34fb")
-    //UART_SERVICE_UUID
-    private val CHAR_UUID = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb")
-    //UART_TX_CHARACTERISTIC_UUID
-    private val CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-
-
-
-    private lateinit var macAddressText: TextView
-    private lateinit var connectionText: TextView
-    private lateinit var pwField: EditText
-    private lateinit var sndBtn: Button
-
-    private lateinit var redBtn: Button
-    private lateinit var greenBtn: Button
-    private lateinit var blueBtn: Button
-    private lateinit var yellowBtn: Button
-    private lateinit var turnOffAll: Button
-    private lateinit var turnOnAll: Button
-
-    // Тут инициализируем всю хуйню для блюпупа
-    private var bluetoothGatt: BluetoothGatt? = null
-    private var uartChar: BluetoothGattCharacteristic? = null
-
-    private val deviceMac = "A8:10:87:6E:5C:30"
+import android.util.Base64
+import java.security.KeyFactory
+import java.security.PublicKey
+import java.security.spec.X509EncodedKeySpec
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.IvParameterSpec
+import java.security.SecureRandom
+import javax.crypto.spec.SecretKeySpec
+class MainActivity : AppCompatActivity() {
+    fun logCreator(
+        message: String,
+        tag: String = "MainPage",
+        level: Int = DEBUG,
+    ) {
+        when (level) {
+            VERBOSE -> Log.v(tag, message)
+            DEBUG -> Log.d(tag, message)
+            INFO -> Log.i(tag, message)
+            WARN -> Log.w(tag, message)
+            ERROR -> Log.e(tag, message)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        initUI()
+        val navView: BottomNavigationView = findViewById(R.id.bottom_navigation)
 
-        // Тут траблы с android выше 12, делаем проверки и требуем права на блютуз
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val permissions = arrayOf(
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT
-            )
-            ActivityCompat.requestPermissions(this, permissions, 100)
+
+        if (savedInstanceState == null) {
+            loadFragment(LoginFragment())
         }
 
-        startBleConnection()
-
-    }
-
-    private fun initUI() {
-        macAddressText = findViewById(R.id.MAC_ADRESS)
-        connectionText = findViewById(R.id.CONNECTION)
-        pwField = findViewById(R.id.PW_FIELD)
-        sndBtn = findViewById(R.id.SEND_BTN)
-
-        redBtn = findViewById(R.id.redBtn)
-        greenBtn = findViewById(R.id.greenBtn)
-        blueBtn = findViewById(R.id.blueBtn)
-        yellowBtn = findViewById(R.id.yellowBtn)
-        turnOffAll = findViewById(R.id.turnOffAll)
-        turnOnAll = findViewById(R.id.turnOnAll)
-
-        macAddressText.text = deviceMac
-        connectionText.text = "Disconnected"
-
-        sndBtn.setOnClickListener {
-            val text = pwField.text.toString()
-            if (text.isNotEmpty()) sndCmd(text)
-        }
-
-        redBtn.setOnClickListener { sndCmd("Red\n") }
-        greenBtn.setOnClickListener { sndCmd("GREEN\n") }
-        blueBtn.setOnClickListener { sndCmd("BLUE\n") }
-        yellowBtn.setOnClickListener { sndCmd("YEL\n") }
-        turnOffAll.setOnClickListener { sndCmd("OFF_ALL\n") }
-        turnOnAll.setOnClickListener { sndCmd("ON_ALL\n") }
-    }
-
-    private fun startBleConnection() {
-        val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
-        val device = bluetoothAdapter.getRemoteDevice(deviceMac)
-
-        bluetoothGatt = device.connectGatt(this, false, gattCallback)
-    }
-
-    private val gattCallback = object : BluetoothGattCallback() {
-
-        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
-            var func_name = "onConnectionStateChange"
-            super.onConnectionStateChange(gatt, status, newState)
-            if (newState == BluetoothProfile.STATE_CONNECTED) {
-                Log.d(TAG, "Connected, discovering services..., +$func_name")
-                connectionText.post { connectionText.text = "Connected" }
-                gatt.discoverServices()
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                Log.e(TAG, "Disconnected, retrying..., +$func_name")
-                connectionText.post { connectionText.text = "Disconnected" }
-                gatt.close()
-                startBleConnection()
+        // Тут переключение вкладок
+        navView.setOnItemSelectedListener { item ->
+            val fragment: Fragment = when (item.itemId) {
+                R.id.nav_login -> LoginFragment()
+                R.id.nav_server -> ServerFragment()
+                R.id.nav_mk -> BluetoothFragment()
+                else -> LoginFragment()
             }
+            loadFragment(fragment)
+            true
         }
+    }
 
-        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            var func_name = "onServicesDiscovered"
-            super.onServicesDiscovered(gatt, status)
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                val service = gatt.getService(SERVICE_UUID)
-                if (service != null) {
-                    uartChar = service.getCharacteristic(CHAR_UUID)
-                    Log.d(TAG, "UART characteristic found, +$func_name")
+    // Тут меняем че показывать пользователю
+    private fun loadFragment(fragment: Fragment) {
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.fragment_container, fragment)
+            .commit()
+    }
 
-                } else {
-                    Log.e(TAG, "Service $SERVICE_UUID not found, retrying discovery...+, +$func_name")
-                    // попробуем ещё раз через 200 мс
-                    Handler(Looper.getMainLooper()).postDelayed({
-                        gatt.discoverServices()
-                    }, 200)
-                }
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 100) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                logCreator("Permissions granted!", level = DEBUG, tag = "Permission")
+
             } else {
-                Log.e(TAG, "onServicesDiscovered failed with status $status, +$func_name")
+                logCreator("Permissions denied by user", level = ERROR, tag = "Permission")
             }
         }
+    }
+}
 
 
-        override fun onCharacteristicWrite(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            status: Int
-        ) {
-            var func_name = "onCharacteristicWrite"
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                Log.d(TAG, "Command sent successfully, status=$status, +$func_name")
-            } else {
-                Log.e(TAG, "Failed to send command, status=$status, +$func_name")
-            }
+
+class CryptManager {
+    fun logCreator(
+        message: String,
+        tag: String = "CryptManager",
+        level: Int = DEBUG,
+    ) {
+        when (level) {
+            VERBOSE -> Log.v(tag, message)
+            DEBUG -> Log.d(tag, message)
+            INFO -> Log.i(tag, message)
+            WARN -> Log.w(tag, message)
+            ERROR -> Log.e(tag, message)
         }
+    }
 
-        override fun onCharacteristicRead(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            status: Int
-        ) {
-            var func_name = "onCharacteristicWrite"
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                val value = String(characteristic.value, Charsets.UTF_8)
-                val data = characteristic.value ?: return
-                val hex = data.joinToString(" ") { String.format("%02X", it) }
-                Log.d(TAG, "Echo from MCU (hex): $hex, func=$func_name")
-                Log.d(TAG, "Echo from MCU: $value, func=$func_name")
-            } else {
-                Log.e(TAG, "Read failed, status=$status, func=$func_name")
-            }
-        }
+    private val rsaTransformation = "RSA/ECB/PKCS1Padding"
+    private val aesTransformation = "AES/CBC/PKCS5Padding"
+    private var sessionAesKey: SecretKey? = null
 
-
-
+    fun generateAesKey(): SecretKey {
+        val keyGen = KeyGenerator.getInstance("AES")
+        keyGen.init(256) // AESka 256aya
+        val key = keyGen.generateKey()
+        this.sessionAesKey = key
+        return key
     }
 
 
-    // Отправка команд на МК
-    fun sndCmd(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, cmd: String) {
+    fun getPublicKeyFromPem(pem: String): PublicKey {
+        // Чистим ключ от говна лишнего
+        val cleanPem = pem
+            .replace("-----BEGIN PUBLIC KEY-----", "")
+            .replace("-----END PUBLIC KEY-----", "")
+            .replace("\n", "")
+            .replace("\r", "")
+            .trim()
+        val decoded = Base64.decode(cleanPem, Base64.DEFAULT)
+        val spec = X509EncodedKeySpec(decoded)
+        return KeyFactory.getInstance("RSA").generatePublic(spec)
+    }
 
-        val command = if (cmd.endsWith("!") || cmd.endsWith("\n")) cmd else cmd + "\n"
 
-        val bytes = command.toByteArray(Charsets.US_ASCII)
+    // Тут кароче шифр для рсашки, которой мы отправим данные на сервак
+    fun encryptWithRSA(data: String, publicKey: PublicKey): String {
+        val cipher = Cipher.getInstance(rsaTransformation)
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+        val encryptedBytes = cipher.doFinal(data.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(encryptedBytes, Base64.NO_WRAP)
+    }
 
-        characteristic.value = bytes
-        characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT // write-with-response
-        val result = gatt.writeCharacteristic(characteristic)
+    // шифр аески нашей, которую мы записали туда
+    fun encryptWithAES(data: String): String {
+        val key = sessionAesKey ?: throw IllegalStateException("AES key not generated!")
+        val cipher = Cipher.getInstance(aesTransformation)
 
-        Log.d(TAG, "Sent command: $command, result=$result")
+        val ivBytes = ByteArray(16)
+        SecureRandom().nextBytes(ivBytes)
+        val iv = IvParameterSpec(ivBytes)
+
+        cipher.init(Cipher.ENCRYPT_MODE, key, iv)
+        val encryptedBytes = cipher.doFinal(data.toByteArray(Charsets.UTF_8))
+        val ret_data = ivBytes+encryptedBytes
+
+        return Base64.encodeToString(ret_data, Base64.NO_WRAP)
+    }
+
+    fun getAesKeyBase64(): String {
+        return Base64.encodeToString(sessionAesKey?.encoded, Base64.NO_WRAP)
+    }
+
+
+    fun decryptWithAES(encryptedPackage: String): String {
+        return try {
+            val fullPackage = Base64.decode(encryptedPackage, Base64.DEFAULT)
+            val iv = fullPackage.copyOfRange(0, 16)
+            val ciphertext = fullPackage.copyOfRange(16, fullPackage.size)
+
+            val keySpec = SecretKeySpec(sessionAesKey?.encoded, "AES")
+            val ivSpec = IvParameterSpec(iv)
+
+
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec)
+
+
+            val decryptedBytes = cipher.doFinal(ciphertext)
+
+            String(decryptedBytes, Charsets.UTF_8)
+        } catch (e: Exception) {
+            logCreator("Ошибка дешифровки AES: ${e.message}", "CryptManager", ERROR)
+            ""
+
+        }
+
     }
 
 }
