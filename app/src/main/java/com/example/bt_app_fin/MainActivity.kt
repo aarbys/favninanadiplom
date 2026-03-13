@@ -108,6 +108,22 @@ class CryptManager {
     private val aesTransformation = "AES/CBC/PKCS5Padding"
     private var sessionAesKey: SecretKey? = null
 
+    private var currentAesIv: ByteArray? = null
+    private var mcuPublicKey: PublicKey? = null
+
+    private val STATIC_KEY = byteArrayOf(0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20)
+    private val STATIC_IV = byteArrayOf(0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88.toByte(), 0x99.toByte(), 0xAA.toByte(), 0xBB.toByte(),
+        0xCC.toByte(), 0xDD.toByte(), 0xEE.toByte(), 0xFF.toByte()
+    )
+
+    fun initSession(publicKey: PublicKey, aesKey: ByteArray, aesIv: ByteArray) {
+        this.mcuPublicKey = publicKey
+        this.sessionAesKey = SecretKeySpec(aesKey, "AES")
+        this.currentAesIv = aesIv
+    }
+
     fun generateAesKey(): SecretKey {
         val keyGen = KeyGenerator.getInstance("AES")
         keyGen.init(256) // AESka 256aya
@@ -140,20 +156,31 @@ class CryptManager {
     }
 
     // шифр аески нашей, которую мы записали туда
-    fun encryptWithAES(data: String): String {
+    fun encryptWithAES(data: String): ByteArray? {
         val key = sessionAesKey ?: throw IllegalStateException("AES key not generated!")
-        val cipher = Cipher.getInstance(aesTransformation)
 
-        val ivBytes = ByteArray(16)
-        SecureRandom().nextBytes(ivBytes)
-        val iv = IvParameterSpec(ivBytes)
+        val cipher = Cipher.getInstance("AES/CBC/NoPadding")
+        val iv = IvParameterSpec(currentAesIv)
 
         cipher.init(Cipher.ENCRYPT_MODE, key, iv)
-        val encryptedBytes = cipher.doFinal(data.toByteArray(Charsets.UTF_8))
-        val ret_data = ivBytes+encryptedBytes
+        val paddedData = data.padEnd(16, ' ').toByteArray(Charsets.UTF_8)
+        val encryptedBytes = cipher.doFinal(paddedData)
 
-        return Base64.encodeToString(ret_data, Base64.NO_WRAP)
+        return encryptedBytes
     }
+    fun encryptWithAESMK(text: String): ByteArray {
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        val keySpec = SecretKeySpec(STATIC_KEY, "AES")
+        val ivSpec = IvParameterSpec(STATIC_IV)
+        cipher.init(Cipher.ENCRYPT_MODE, keySpec, ivSpec)
+
+        // Внимание: для МК нужно дополнить строку до 16 байт,
+        // если не используешь Padding на обеих сторонах
+        return cipher.doFinal(text.toByteArray())
+    }
+
+
+
 
     fun getAesKeyBase64(): String {
         return Base64.encodeToString(sessionAesKey?.encoded, Base64.NO_WRAP)
@@ -183,6 +210,33 @@ class CryptManager {
 
         }
 
+    }
+
+    // bytes -> PublicKey
+    fun getPublicKeyFromBytes(keyBytes: ByteArray): PublicKey {
+        val spec = X509EncodedKeySpec(keyBytes)
+        return KeyFactory.getInstance("RSA").generatePublic(spec)
+    }
+
+    // random bytes for IV and key
+    fun generateRandomBytes(size: Int): ByteArray {
+        val bytes = ByteArray(size)
+        SecureRandom().nextBytes(bytes)
+        return bytes
+    }
+
+    // Encrypt with rsa (handshake only)
+    fun encryptHandshakeRSA(password: String, aesKey: ByteArray, aesIv: ByteArray, publicKey: PublicKey): ByteArray {
+        val cipher = Cipher.getInstance(rsaTransformation)
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+
+        val payload = password.toByteArray(Charsets.UTF_8) +
+                " ".toByteArray(Charsets.UTF_8) +
+                aesKey +
+                aesIv
+
+
+        return cipher.doFinal(payload)
     }
 
 }

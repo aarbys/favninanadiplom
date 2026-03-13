@@ -1,5 +1,7 @@
 package com.example.bt_app_fin
 
+import android.os.Handler
+import android.os.Looper
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -25,6 +27,7 @@ import android.util.Log.ERROR
 import android.util.Log.INFO
 import android.util.Log.VERBOSE
 import android.util.Log.WARN
+import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -47,6 +50,15 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
     }
 
     private val sharedViewModel: SharedViewModel by activityViewModels()
+    private val mkCryptManager = CryptManager()
+    private var isEncryptionReady = false
+
+
+    private val rsaKeyBuffer = mutableListOf<Byte>()
+    private var isCollectingKey = false
+    private val EXPECTED_RSA_SIZE = 294 // Примерный размер для RSA-2048 в DER
+
+
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -74,7 +86,16 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
                 tvStatus.setTextColor(Color.RED)
             }
             // Блокируем кнопки, если нет связи
-            setButtonsEnabled(isConnected, btnRed, btnYellow, btnGreen, btnBlue, btnOnAll, btnOffAll, btnSend)
+            setButtonsEnabled(
+                isConnected,
+                btnRed,
+                btnYellow,
+                btnGreen,
+                btnBlue,
+                btnOnAll,
+                btnOffAll,
+                btnSend
+            )
         }
 
         // Отображение данных от МК
@@ -82,26 +103,42 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
             tvMkData.text = data
         }
 
+
+        createNotificationChannel()
+        checkPermissionsAndConnect()
         // Кнопки отвечающие за цвета
         btnRed.setOnClickListener { sndCmd("RED") }
         btnYellow.setOnClickListener { sndCmd("YEL") }
         btnGreen.setOnClickListener { sndCmd("GREEN") }
-        btnBlue.setOnClickListener { sndCmd("BBLUE") }
+        btnBlue.setOnClickListener { sndCmd("BLUE") }
         btnOnAll.setOnClickListener { sndCmd("ON_ALL") }
         btnOffAll.setOnClickListener { sndCmd("OFF") }
 
         // Отправка текста из поля пароля
-        btnSend.setOnClickListener {
-            val text = pwField.text.toString()
-            if (text.isNotEmpty()) {
-                sndCmd(text)
-                pwField.text.clear()
-            }
+        btnSend.setOnClickListener@androidx.annotation.RequiresPermission(
+            android.Manifest.permission.BLUETOOTH_CONNECT
+        ) {
+            val pubKey = mkCryptManager.getPublicKeyFromBytes(rsaKeyBuffer.toByteArray())
+            val aesKey = mkCryptManager.generateRandomBytes(32)
+            val aesIv = mkCryptManager.generateRandomBytes(16)
+            mkCryptManager.initSession(pubKey, aesKey, aesIv)
+            val finalKey = rsaKeyBuffer.toByteArray()
+            val hexString = finalKey.joinToString(" ") { String.format("%02x", it) }
+            logCreator("PUBLIC KEY HEX: $hexString", "RSA_DEBUG", DEBUG)
+
+            val handshake = mkCryptManager.encryptHandshakeRSA("Pass123", aesKey, aesIv, pubKey)
+
+
+            // handshake to MK
+            val gatt = sharedViewModel.bluetoothGatt
+            val char = sharedViewModel.uartChar
+            char?.value = handshake
+            gatt!!.writeCharacteristic(char)
         }
 
 
-        createNotificationChannel()
-        checkPermissionsAndConnect()
+
+
 
 
     }
@@ -115,24 +152,36 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
         val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
         val device = bluetoothAdapter.getRemoteDevice(sharedViewModel.deviceMac)
         // Разрешение на использование блюпупа на андроидах выше 12
+        if (!isAdded){
+            return
+        }
         if (ActivityCompat.checkSelfPermission(
                 requireContext(),
                 Manifest.permission.BLUETOOTH_CONNECT
             ) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S
         ) {
-            sharedViewModel.bluetoothGatt = device.connectGatt(requireContext(), false, gattCallback)
+            sharedViewModel.bluetoothGatt =
+                device.connectGatt(requireContext(), false, gattCallback)
         }
     }
 
 
-
     private val gattCallback = object : BluetoothGattCallback() {
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             val func = "onConnectionStateChange"
             try {
                 // Если устройство подключено, то ставим в приложении статус "Connected"
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    logCreator(message = "Connected to ${sharedViewModel.deviceMac}", tag = "Connect")
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        sndCmd("GET_KEY")
+                        logCreator("Запросил публичный ключ у МК", tag = "RSA")
+                    }, 1500)
+
+                    logCreator(
+                        message = "Connected to ${sharedViewModel.deviceMac}",
+                        tag = "Connect"
+                    )
                     // Ставим статус
                     activity?.runOnUiThread {
                         sharedViewModel.setMkConnection(true)
@@ -174,10 +223,12 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
 
         }
 
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             val func = "onServicesDiscovered"
             try {
                 if (status == BluetoothGatt.GATT_SUCCESS) {
+
                     // Если нет сервиса на МК, то падает ошибка
                     val service = gatt.getService(sharedViewModel.SERVICE_UUID)
                         ?: throw Exception("Service not found on device")
@@ -202,6 +253,7 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
         }
 
         // Включение уведомления для эха
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         private fun enableNotifications(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic
@@ -237,21 +289,73 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
         }
 
         // Смотрим что нам вернул наш МК на команду
+        @Deprecated("Deprecated in Java")
+        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic
         ) {
             val func = "onCharacteristicChanged"
             try {
-                // Получаем байты
+                // Получаем байты + лог
                 val data = characteristic.value ?: return
+                val hexString = data.joinToString(" ") { String.format("%02x", it) }
+                Log.d("RSA_KEY_DEBUG", "Received Bytes (HEX):$isCollectingKey  $hexString ")
+
+
+                // Ключ пришёл или нет
+                if (data[0] == 0x30.toByte() && !isCollectingKey) {
+                    rsaKeyBuffer.clear()
+                    isCollectingKey = true
+                    logCreator("Start collecting RSA Key...", tag = "RSA", level = INFO)
+                }
+
+                if (isCollectingKey) {
+                    rsaKeyBuffer.addAll(data.toList())
+
+                    if (rsaKeyBuffer.size >= 290) {
+                        isCollectingKey = false
+                        try{
+                            // Инициализируем криптографию
+
+                            val pubKey = mkCryptManager.getPublicKeyFromBytes(rsaKeyBuffer.toByteArray())
+                            val aesKey = mkCryptManager.generateRandomBytes(32)
+                            val aesIv = mkCryptManager.generateRandomBytes(16)
+                            mkCryptManager.initSession(pubKey, aesKey, aesIv)
+                            val finalKey = rsaKeyBuffer.toByteArray()
+                            val hexString = finalKey.joinToString(" ") { String.format("%02x", it) }
+                            logCreator("PUBLIC KEY HEX: $hexString", "RSA_DEBUG", DEBUG)
+
+                            val handshake = mkCryptManager.encryptHandshakeRSA("Pass123", aesKey, aesIv, pubKey)
+
+
+                            // handshake to MK
+                            Thread.sleep(100)
+                            characteristic.value = handshake
+                            gatt.writeCharacteristic(characteristic)
+                            isEncryptionReady = true
+                            logCreator("Handshake отправлен на МК", tag = "RSA", level = INFO)
+
+                        }
+                        catch (e:Exception){
+                            logCreator("Ошибка крипто-рукопожатия: ${e.message}", tag = "RSA", level = ERROR)
+                        }
+
+                        activity?.runOnUiThread {
+                            Toast.makeText(context, "Ключ получен, шифрование готово", Toast.LENGTH_SHORT).show()
+                        }
+                        return // Выходим, чтобы не обрабатывать ключ как текстовую команду
+                    }
+                }
+
 
                 // Конвертируем в строку
                 val part = String(data, Charsets.UTF_8)
 
                 sharedViewModel.bleBuffer += part
-                if (sharedViewModel.bleBuffer.contains("\n")) {
-                    val message = sharedViewModel.bleBuffer.trim()
+                val txt = mkCryptManager.decryptWithAES(sharedViewModel.bleBuffer)
+                if (txt.contains("\n")) {
+                    val message = txt.trim()
                     if (message.isNotEmpty()) {
                         logCreator(message = "MCU says: $message", level = DEBUG, tag = "ECHO")
                         activity?.runOnUiThread {
@@ -274,8 +378,36 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
     }
 
     // IN PROGRESS
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun sndCmd(cmd: String) {
-//
+        val gatt = sharedViewModel.bluetoothGatt
+        val char = sharedViewModel.uartChar
+
+        if (gatt == null || char == null) {
+            logCreator("Cannot send: Not connected", level = WARN, tag = "BT")
+            Toast.makeText(context, "Нет подключения к МК", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        try {
+            val dataToSend: ByteArray? = if (cmd == "GET_KEY") {
+                (cmd + "!").toByteArray(Charsets.UTF_8)
+            } else if (isEncryptionReady) {
+                mkCryptManager.encryptWithAESMK(cmd)
+            } else {
+                (cmd + "!").toByteArray(Charsets.UTF_8)
+            }
+
+            // Отправка данных
+            char.value = dataToSend
+            gatt.writeCharacteristic(char)
+
+            logCreator("Sent command: $cmd (Encrypted: $isEncryptionReady)", tag = "BT")
+
+        } catch (e: Exception) {
+            logCreator("Error encrypting/sending: ${e.message}", level = ERROR, tag = "BT")
+        }
+
     }
 
 
@@ -287,7 +419,8 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
             val channel = NotificationChannel(sharedViewModel.CHANNEL_ID, name, importance).apply {
                 description = descriptionText
             }
-            val manager = requireContext().getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val manager =
+                requireContext().getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
         }
     }
@@ -328,10 +461,19 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         //Просим разрешения
-        if (permissions.isNotEmpty()) {
-            ActivityCompat.requestPermissions(requireActivity(), permissions.toTypedArray(), 100)
-        } else {//Если старый андроид, то пофиг на разрешения
+        val allGranted = permissions.all {
+            ActivityCompat.checkSelfPermission(
+                requireContext(),
+                it
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+
+        if (allGranted || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            // Если разрешения есть, сразу запускаем подключение
             startBleConnection()
+        } else {
+            // Если нет — запрашиваем
+            ActivityCompat.requestPermissions(requireActivity(), permissions.toTypedArray(), 100)
         }
     }
 
