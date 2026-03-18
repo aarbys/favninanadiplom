@@ -51,7 +51,7 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
 
     private val sharedViewModel: SharedViewModel by activityViewModels()
     private val mkCryptManager = CryptManager()
-    private var isEncryptionReady = false
+    private var isEncryptionReady = true
 
 
     private val rsaKeyBuffer = mutableListOf<Byte>()
@@ -333,7 +333,7 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
                             Thread.sleep(100)
                             characteristic.value = handshake
                             gatt.writeCharacteristic(characteristic)
-                            isEncryptionReady = true
+                            //isEncryptionReady = true
                             logCreator("Handshake отправлен на МК", tag = "RSA", level = INFO)
 
                         }
@@ -350,19 +350,27 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
 
 
                 // Конвертируем в строку
-                val part = String(data, Charsets.UTF_8)
 
-                sharedViewModel.bleBuffer += part
-                val txt = mkCryptManager.decryptWithAES(sharedViewModel.bleBuffer)
-                if (txt.contains("\n")) {
-                    val message = txt.trim()
-                    if (message.isNotEmpty()) {
-                        logCreator(message = "MCU says: $message", level = DEBUG, tag = "ECHO")
+                sharedViewModel.bleBuffer += data
+                while (sharedViewModel.bleBuffer.size >= 16) {
+                    val packet = sharedViewModel.bleBuffer.copyOfRange(0, 16)
+                    sharedViewModel.bleBuffer = sharedViewModel.bleBuffer.copyOfRange(16, sharedViewModel.bleBuffer.size)
+
+                    val txt = mkCryptManager.decryptWithAESMK(packet).trim()
+                    if (txt.isNotEmpty()) {
+                        logCreator(
+                            message = "MCU says: $txt",
+                            level = DEBUG,
+                            tag = "ECHO"
+                        )
+
+                        sharedViewModel.setMkData(txt)
+                        sharedViewModel.sendEncryptedDataToServer(txt, source = "MK")
+
                         activity?.runOnUiThread {
-                            showNotification(message)
+                            showNotification(txt)
                         }
                     }
-                    sharedViewModel.bleBuffer = ""
                 }
 
             } catch (e: Exception) {
@@ -402,6 +410,8 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
             char.value = dataToSend
             gatt.writeCharacteristic(char)
 
+            val aboba = dataToSend?.joinToString(" ") { String.format("%02x", it) }
+            logCreator("Sent command (hex): $aboba", tag = "BT")
             logCreator("Sent command: $cmd (Encrypted: $isEncryptionReady)", tag = "BT")
 
         } catch (e: Exception) {
@@ -413,8 +423,8 @@ class BluetoothFragment : Fragment(R.layout.activity_mk) {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "MCU Messages"
-            val descriptionText = "Уведомления от вашего контроллера"
+                val name = "MCU Messages"
+                val descriptionText = "Уведомления от вашего контроллера"
             val importance = NotificationManager.IMPORTANCE_DEFAULT
             val channel = NotificationChannel(sharedViewModel.CHANNEL_ID, name, importance).apply {
                 description = descriptionText

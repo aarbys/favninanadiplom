@@ -129,6 +129,7 @@ class CryptManager {
         keyGen.init(256) // AESka 256aya
         val key = keyGen.generateKey()
         this.sessionAesKey = key
+        this.currentAesIv = generateRandomBytes(16)
         return key
     }
 
@@ -156,17 +157,17 @@ class CryptManager {
     }
 
     // шифр аески нашей, которую мы записали туда
-    fun encryptWithAES(data: String): ByteArray? {
+    fun encryptWithAES(data: String): ByteArray {
         val key = sessionAesKey ?: throw IllegalStateException("AES key not generated!")
-
-        val cipher = Cipher.getInstance("AES/CBC/NoPadding")
-        val iv = IvParameterSpec(currentAesIv)
+        val freshIv = generateRandomBytes(16)
+        currentAesIv = freshIv
+        val cipher = Cipher.getInstance(aesTransformation)
+        val iv = IvParameterSpec(freshIv)
 
         cipher.init(Cipher.ENCRYPT_MODE, key, iv)
-        val paddedData = data.padEnd(16, ' ').toByteArray(Charsets.UTF_8)
-        val encryptedBytes = cipher.doFinal(paddedData)
+        val encryptedBytes = cipher.doFinal(data.toByteArray(Charsets.UTF_8))
 
-        return encryptedBytes
+        return freshIv + encryptedBytes
     }
     fun encryptWithAESMK(text: String): ByteArray {
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
@@ -186,6 +187,38 @@ class CryptManager {
         return Base64.encodeToString(sessionAesKey?.encoded, Base64.NO_WRAP)
     }
 
+    fun decryptWithAESMK(encryptedBytes: ByteArray): String {
+        return try {
+            if (encryptedBytes.size != 16) {
+                logCreator(
+                    "Ошибка дешифровки AES MK: ожидалось 16 байт, получено ${encryptedBytes.size}",
+                    "CryptManager",
+                    ERROR
+                )
+                return ""
+            }
+
+            val keyBytes = STATIC_KEY
+            if (keyBytes == null) {
+                logCreator("Ошибка дешифровки AES MK: sessionAesKey == null", "CryptManager", ERROR)
+                return ""
+            }
+
+            val keySpec = SecretKeySpec(keyBytes, "AES")
+            val ivSpec = IvParameterSpec(STATIC_IV)
+
+            val cipher = Cipher.getInstance("AES/CBC/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec)
+
+            val decryptedBytes = cipher.doFinal(encryptedBytes)
+
+            String(decryptedBytes, Charsets.UTF_8)
+                .trimEnd('\u0000', ' ', '\r', '\n')
+        } catch (e: Exception) {
+            logCreator("Ошибка дешифровки AES MK: ${e.message}", "CryptManager", ERROR)
+            ""
+        }
+    }
 
     fun decryptWithAES(encryptedPackage: String): String {
         return try {
